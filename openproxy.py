@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import threading
@@ -10,6 +11,8 @@ import requests
 UPSTREAM = "https://opencode.ai/zen/v1/chat/completions"
 CHECK_URL = "https://opencode.ai/zen/v1/models"
 PROXY_REQUEST_TIMEOUT = 15
+RATELIMIT_HOURS = 10
+RATELIMITED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ratelimited.json")
 DEFAULT_PROXY_SOURCE = "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/all-proxies.txt"
 UPSTREAM_KEY = "public"
 UPSTREAM_UA = "opencode/1.18.18"
@@ -120,6 +123,78 @@ def save_proxy_list(path, proxies):
         json.dump({"proxies": proxies}, f, indent=2)
 
 
+def load_ratelimited():
+    try:
+        with open(RATELIMITED_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        entries = data.get("proxies", [])
+        return entries if isinstance(entries, list) else []
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def save_ratelimited(entries):
+    with open(RATELIMITED_PATH, "w", encoding="utf-8") as f:
+        json.dump({"proxies": entries}, f, indent=2)
+
+
+def release_expired_ratelimited():
+    now = datetime.now(timezone.utc)
+    active = load_proxy_list(CONFIG_PATH)
+    remaining = []
+    released = []
+    for entry in load_ratelimited():
+        if isinstance(entry, str):
+            proxy = entry
+            added_at = ""
+        else:
+            proxy = str(entry.get("proxy", "")).strip()
+            added_at = entry.get("added_at", "")
+        try:
+            expired = now - datetime.fromisoformat(added_at) >= timedelta(hours=RATELIMIT_HOURS)
+        except (TypeError, ValueError):
+            expired = False
+        if proxy and expired:
+            if proxy not in active:
+                active.append(proxy)
+            released.append(proxy)
+        elif proxy:
+            remaining.append(entry)
+    if released:
+        save_proxy_list(CONFIG_PATH, active)
+        save_ratelimited(remaining)
+        print("Released %d proxy(s) from ratelimited.json." % len(released), flush=True)
+    return active
+
+
+def quarantine_proxy(proxy, status):
+    now = datetime.now(timezone.utc).isoformat()
+    entries = load_ratelimited()
+    entries = [entry for entry in entries if (entry.get("proxy") if isinstance(entry, dict) else entry) != proxy]
+    entries.append({"proxy": proxy, "status": status, "added_at": now})
+    save_ratelimited(entries)
+    active = [item for item in load_proxy_list(CONFIG_PATH) if item != proxy]
+    save_proxy_list(CONFIG_PATH, active)
+    with LOCK:
+        STATE["proxies"] = [item for item in STATE["proxies"] if item != proxy]
+
+
+def mark_failed_proxy(proxy, reason):
+    if proxy == "direct":
+        return
+    directory = os.path.dirname(CONFIG_PATH)
+    path = os.path.join(directory, "failed.json")
+    failed = load_proxy_list(path)
+    if proxy not in failed:
+        failed.append(proxy)
+        save_proxy_list(path, failed)
+    active_path = os.path.join(directory, "proxies.json")
+    save_proxy_list(active_path, [item for item in load_proxy_list(active_path) if item != proxy])
+    with LOCK:
+        STATE["proxies"] = [item for item in STATE["proxies"] if item != proxy]
+    print("[proxy] moved to failed.json: %s (%s)" % (proxy, reason), flush=True)
+
+
 def load_proxy_list(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -188,6 +263,12 @@ def describe_proxy():
 class Handler(BaseHTTPRequestHandler):
     server_version = "OpenAIFreeProxy/1.0"
     protocol_version = "HTTP/1.1"
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            print("[proxy] client disconnected", flush=True)
 
     def log_message(self, fmt, *args):
         print("[proxy] %s %s -> %s" % (self.command, self.path, fmt % args), flush=True)
@@ -299,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
                         last_status = resp.status_code
                         last_data = resp.content
                         errors.append("%s: HTTP %d" % (spec, resp.status_code))
+                        if resp.status_code in (403, 429, 500):
+                            quarantine_proxy(spec, resp.status_code)
                         continue
 
                     if spec != STATE.get("proxy_spec"):
@@ -318,8 +401,11 @@ class Handler(BaseHTTPRequestHandler):
                                     self.wfile.flush()
                             self.wfile.write(b"0\r\n\r\n")
                             self.wfile.flush()
-                        except Exception as e:
-                            print("[proxy] stream error: %r" % e, flush=True)
+                        except requests.exceptions.RequestException as e:
+                            mark_failed_proxy(spec, "timeout or connection error")
+                            print("[proxy] stream ended: %s" % e, flush=True)
+                        except OSError as e:
+                            print("[proxy] stream ended: %s" % e, flush=True)
                     else:
                         data = resp.content
                         self.send_response(200)
@@ -330,6 +416,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.write(data)
                     return
             except requests.exceptions.RequestException as e:
+                mark_failed_proxy(spec, "timeout or connection error")
                 errors.append("%s: %s" % (spec, e))
             except Exception as e:
                 errors.append("%s: %s" % (spec, e))
@@ -363,7 +450,7 @@ def main():
         return check_config_proxies(args.source, 10)
 
     cfg = load_config()
-    configured = cfg.get("proxies", [])
+    configured = release_expired_ratelimited()
     if not isinstance(configured, list):
         configured = []
     configured = [str(spec).strip() for spec in configured if str(spec).strip()]
