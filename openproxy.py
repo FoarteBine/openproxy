@@ -347,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def parse_args():
     p = argparse.ArgumentParser(description="OpenAI-compatible proxy")
-    p.add_argument("mode", nargs="?", choices=("test", "proxy"), default="direct",
+    p.add_argument("mode", nargs="?", choices=("test", "proxy"), default=None,
                    help="test: check public proxies and create proxies.json; proxy: run with automatic failover")
     p.add_argument("source", nargs="?", default=DEFAULT_PROXY_SOURCE,
                    help="URL of a text proxy list, used with test")
@@ -357,6 +357,7 @@ def parse_args():
 def main():
     global CONFIG_PATH
     args = parse_args()
+    args.mode = args.mode or "direct"
 
     if args.mode == "test":
         return check_config_proxies(args.source, 10)
