@@ -15,7 +15,7 @@ RATELIMIT_HOURS = 10
 RATELIMITED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ratelimited.json")
 DEFAULT_PROXY_SOURCE = "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/all-proxies.txt"
 UPSTREAM_KEY = "public"
-UPSTREAM_UA = "opencode/1.18.18"
+UPSTREAM_UA = "opencode/1.18.19"
 
 FREE_MODELS = [
     "deepseek-v4-flash-free",
@@ -25,6 +25,7 @@ FREE_MODELS = [
     "mimo-v2.5-free",
     "nemotron-3-ultra-free",
     "nemotron-3.5-lightning-free",
+    "muse-spark-1.2-contributor-free"
 ]
 DEFAULT_MODEL = "deepseek-v4-flash-free"
 
