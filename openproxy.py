@@ -9,6 +9,7 @@ import requests
 
 UPSTREAM = "https://opencode.ai/zen/v1/chat/completions"
 CHECK_URL = "https://opencode.ai/zen/v1/models"
+PROXY_REQUEST_TIMEOUT = 15
 DEFAULT_PROXY_SOURCE = "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/all-proxies.txt"
 UPSTREAM_KEY = "public"
 UPSTREAM_UA = "opencode/1.18.18"
@@ -292,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
                     data=json.dumps(upstream),
                     headers={"Accept": "text/event-stream" if is_stream else "application/json"},
                     stream=is_stream,
-                    timeout=300,
+                    timeout=PROXY_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status_code != 200:
                         last_status = resp.status_code
