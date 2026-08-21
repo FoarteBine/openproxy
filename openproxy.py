@@ -18,7 +18,6 @@ UPSTREAM_KEY = "public"
 UPSTREAM_UA = "opencode/1.18.19"
 
 FREE_MODELS = [
-    "deepseek-v4-flash-free",
     "big-pickle",
     "hy3-free",
     "laguna-s-2.1-free",
@@ -27,7 +26,7 @@ FREE_MODELS = [
     "nemotron-3.5-lightning-free",
     "muse-spark-1.2-contributor-free"
 ]
-DEFAULT_MODEL = "deepseek-v4-flash-free"
+DEFAULT_MODEL = "big-pickle"
 
 SUPPORTED_SCHEMES = ("http", "https", "socks4", "socks4a", "socks5", "socks5h")
 
